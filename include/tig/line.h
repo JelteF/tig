@@ -1,4 +1,4 @@
-/* Copyright (c) 2006-2022 Jonas Fonseca <jonas.fonseca@gmail.com>
+/* Copyright (c) 2006-2025 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -54,6 +54,7 @@ extern short color_pairs_map[257][257];
 	_(COMMITTER,		"committer "), \
 	_(DEFAULT,		""), \
 	_(CURSOR,		""), \
+	_(CURSOR_BLUR,		""), \
 	_(STATUS,		""), \
 	_(DELIMITER,		""), \
 	_(DATE,			""), \
@@ -73,6 +74,10 @@ extern short color_pairs_map[257][257];
 	_(MAIN_TAG,		""), \
 	_(MAIN_LOCAL_TAG,	""), \
 	_(MAIN_REMOTE,		""), \
+	_(MAIN_STASH,		""), \
+	_(MAIN_NOTE,		""), \
+	_(MAIN_PREFETCH,	""), \
+	_(MAIN_OTHER,		""), \
 	_(MAIN_REPLACE,		""), \
 	_(MAIN_TRACKED,		""), \
 	_(MAIN_REF,		""), \

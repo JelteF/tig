@@ -1,4 +1,4 @@
-/* Copyright (c) 2006-2022 Jonas Fonseca <jonas.fonseca@gmail.com>
+/* Copyright (c) 2006-2025 Jonas Fonseca <jonas.fonseca@gmail.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -77,9 +77,6 @@ blame_open(struct view *view, enum open_flags flags)
 	enum status_code code;
 	size_t i;
 
-	if (!(repo.is_inside_work_tree || *repo.worktree))
-		return error("The blame view requires a working tree");
-
 	if (is_initial_view(view)) {
 		/* Finish validating and setting up blame options */
 		if (!opt_file_args || opt_file_args[1])
@@ -89,6 +86,9 @@ blame_open(struct view *view, enum open_flags flags)
 			opt_blame_options = opt_cmdline_args;
 			opt_cmdline_args = NULL;
 		}
+
+		if (opt_commit_order == COMMIT_ORDER_REVERSE)
+			argv_append(&opt_blame_options, "--reverse");
 
 		/*
 		 * flags (like "--max-age=123") and bottom limits (like "^foo")
@@ -125,7 +125,7 @@ blame_open(struct view *view, enum open_flags flags)
 
 	if (!view->env->file[0] && opt_file_args && !opt_file_args[1]) {
 		const char *ls_tree_argv[] = {
-			"git", "ls-tree", "-d", "-z", *view->env->ref ? view->env->ref : view->env->commit, opt_file_args[0], NULL
+			"git", "ls-tree", "-d", "-z", *view->env->ref ? view->env->ref : "HEAD", opt_file_args[0], NULL
 		};
 		char buf[SIZEOF_STR] = "";
 
@@ -216,6 +216,8 @@ static bool
 blame_read(struct view *view, struct buffer *buf, bool force_stop)
 {
 	struct blame_state *state = view->private;
+	struct view_column *column = get_view_column(view, VIEW_COLUMN_DATE);
+	bool use_author_date = column && column->opt.date.use_author;
 
 	if (!buf) {
 		if (failed_to_load_initial_view(view))
@@ -253,7 +255,7 @@ blame_read(struct view *view, struct buffer *buf, bool force_stop)
 
 		state->commit = NULL;
 
-	} else if (parse_blame_info(state->commit, state->author, buf->data)) {
+	} else if (parse_blame_info(state->commit, state->author, buf->data, use_author_date)) {
 		if (!state->commit->filename)
 			return false;
 
@@ -330,7 +332,7 @@ setup_blame_parent_line(struct view *view, struct blame *blame)
 				blamed_lineno = atoi(pos + 1);
 
 		} else if (*line == '+' && parent_lineno != -1) {
-			if (blame->lineno == blamed_lineno - 1 &&
+			if (blame->lineno == blamed_lineno &&
 			    !strcmp(blame->text, line + 1)) {
 				view->pos.lineno = parent_lineno ? parent_lineno - 1 : 0;
 				break;
@@ -352,7 +354,7 @@ blame_go_forward(struct view *view, struct blame *blame, bool parent)
 	const char *filename = parent ? commit->parent_filename : commit->filename;
 
 	if (!*id && parent) {
-		report("The selected commit has no parents");
+		report("The selected commit has no parents with this file");
 		return;
 	}
 
@@ -368,9 +370,12 @@ blame_go_forward(struct view *view, struct blame *blame, bool parent)
 
 	string_ncopy(view->env->ref, id, sizeof(commit->id));
 	string_ncopy(view->env->file, filename, strlen(filename));
-	if (parent)
+	if (parent) {
 		setup_blame_parent_line(view, blame);
-	view->env->goto_lineno = view->pos.lineno;
+		view->env->goto_lineno = view->pos.lineno;
+	} else {
+		view->env->goto_lineno = blame->lineno - 1;
+	}
 	reload_view(view);
 }
 
@@ -428,6 +433,7 @@ blame_request(struct view *view, enum request request, struct line *line)
 			const char *diff_parent_argv[] = {
 				GIT_DIFF_BLAME(encoding_arg,
 					diff_context_arg(),
+					diff_prefix_arg(),
 					ignore_space_arg(),
 					word_diff_arg(),
 					blame->commit->filename)
@@ -445,7 +451,9 @@ blame_request(struct view *view, enum request request, struct line *line)
 			if (diff->pipe)
 				string_copy_rev(diff->ref, NULL_ID);
 		} else {
-			open_diff_view(view, flags);
+			string_ncopy(view->env->file, blame->commit->filename, strlen(blame->commit->filename));
+			view->env->blame_lineno = blame->lineno;
+			open_diff_view(view, flags | OPEN_RELOAD);
 		}
 		break;
 
@@ -453,6 +461,10 @@ blame_request(struct view *view, enum request request, struct line *line)
 		string_copy_rev(view->env->goto_id, view->env->commit);
 		open_main_view(view, OPEN_RELOAD);
 		break;
+
+	case REQ_VIEW_BLOB:
+		string_ncopy(view->env->file, blame->commit->filename, strlen(blame->commit->filename));
+		return request;
 
 	default:
 		return request;
@@ -466,14 +478,18 @@ blame_select(struct view *view, struct line *line)
 {
 	struct blame *blame = line->data;
 	struct blame_commit *commit = blame->commit;
+	const char *text = blame->text;
 
 	if (!commit)
 		return;
 
-	if (string_rev_is_null(commit->id))
+	if (string_rev_is_null(commit->id)) {
 		string_ncopy(view->env->commit, "HEAD", 4);
-	else
+		string_format(view->ref, "%s", commit->filename);
+	} else {
 		string_copy_rev(view->env->commit, commit->id);
+		string_format(view->ref, "%s changed %s", commit->id, commit->filename);
+	}
 
 	if (strcmp(commit->filename, view->env->file))
 		string_format(view->env->file_old, "%s", commit->filename);
@@ -481,12 +497,14 @@ blame_select(struct view *view, struct line *line)
 		view->env->file_old[0] = '\0';
 
 	view->env->lineno = view->pos.lineno + 1;
+	string_ncopy(view->env->text, text, strlen(text));
+	view->env->blob[0] = 0;
 }
 
 static struct view_ops blame_ops = {
 	"line",
 	argv_env.commit,
-	VIEW_SEND_CHILD_ENTER | VIEW_BLAME_LIKE,
+	VIEW_SEND_CHILD_ENTER | VIEW_BLAME_LIKE | VIEW_REFRESH,
 	sizeof(struct blame_state),
 	blame_open,
 	blame_read,
