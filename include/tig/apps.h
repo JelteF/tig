@@ -32,6 +32,7 @@ struct app_external {
  */
 
 struct app_external *app_diff_highlight_load(const char *query);
+bool path_is_delta(const char *path);
 
 #endif
 

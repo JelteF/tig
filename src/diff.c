@@ -12,6 +12,7 @@
  */
 
 #include "tig/argv.h"
+#include "tig/apps.h"
 #include "tig/refdb.h"
 #include "tig/repo.h"
 #include "tig/options.h"
